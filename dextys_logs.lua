@@ -2,6 +2,8 @@
 local deathWebhookUrl = "https://discord.com/api/webhooks/XXXXXX/XXXXXXXXXXXX" -- Kuoleman logi
 local chatWebhookUrl = "https://discord.com/api/webhooks/YYYYYY/YYYYYYYYYY" -- Chat logi
 local adminCommandWebhookUrl = "https://discord.com/api/webhooks/ZZZZZ/ZZZZZZZZZZ" -- Admin-komentojen logi
+local playerJoinLeaveWebhookUrl = "https://discord.com/api/webhooks/AAAAA/AAAAAAAAAA" -- Pelaajan liittymisen ja poistumisen logi
+
 
 if GetCurrentResourceName() ~= "dextys_logs" then
     print("Virhe: Tämä skripti toimii vain 'dextys_logs' kansion nimellä!")
@@ -42,6 +44,7 @@ AddEventHandler('playerCommand', function(source, command, args)
     if isPlayerAdmin(source) then
         local playerName = GetPlayerName(source)
 
+        -- Tarkistetaan, mikä komento on käytössä
         if command == "giveitem" then
             local itemName = args[1] or "Tuntematon"
             local amount = args[2] or "1"
@@ -61,5 +64,28 @@ AddEventHandler('playerCommand', function(source, command, args)
     end
 end)
 
+-- Pelaajan liittyminen serverille
+AddEventHandler('playerConnecting', function(playerName, setKickReason, deferrals)
+    local message = "**Pelaaja liittyi serverille!**\n**Nimi:** " .. playerName
+    sendToDiscord(playerJoinLeaveWebhookUrl, message)
+end)
 
+-- Pelaajan poistuminen serveriltä (mikäli hän kuoli, tai syy on disconnect, kick, ban, crash jne.)
+AddEventHandler('playerDropped', function(reason)
+    local playerName = GetPlayerName(source)
+    local disconnectReason = reason or "Tuntematon syy"
+
+    -- Tarkistetaan, oliko pelaaja kuollut
+    local isDead = false
+    if exports['baseevents']:getPlayerDead(source) then
+        isDead = true
+    end
+
+    -- Lähetetään tieto Discordiin
+    local deathStatus = isDead and "Kuollut" or "Elossa"
+    local message = "**Pelaaja poistui serveriltä!**\n**Nimi:** " .. playerName .. "\n**Poistumisen syy:** " .. disconnectReason .. "\n" .. deathStatus
+    sendToDiscord(playerJoinLeaveWebhookUrl, message)
+end)
+
+-- Tiedotuksen kirjoittaminen konsoliin, kun skripti latautuu
 print("[Dextys Logs] Ladattu onnistuneesti!")
