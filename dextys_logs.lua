@@ -1,91 +1,172 @@
--- Discord Webhookit
-local deathWebhookUrl = "https://discord.com/api/webhooks/XXXXXX/XXXXXXXXXXXX" -- Kuoleman logi
-local chatWebhookUrl = "https://discord.com/api/webhooks/YYYYYY/YYYYYYYYYY" -- Chat logi
-local adminCommandWebhookUrl = "https://discord.com/api/webhooks/ZZZZZ/ZZZZZZZZZZ" -- Admin-komentojen logi
-local playerJoinLeaveWebhookUrl = "https://discord.com/api/webhooks/AAAAA/AAAAAAAAAA" -- Pelaajan liittymisen ja poistumisen logi
+-- Tarkistetaan kansion nimi
+local folderName = GetCurrentResourceName()
 
-
-if GetCurrentResourceName() ~= "dextys_logs" then
-    print("Virhe: Tämä skripti toimii vain 'dextys_logs' kansion nimellä!")
+-- Jos kansio ei ole "dextys_log", lopetetaan skripti
+if folderName ~= "dextys_log" then
+    print("Virhe: Tämä skripti vaatii, että se on nimeltään 'dextys_log'.")
     return
 end
 
-local QBCore = exports['qb-core']:GetCoreObject()
+-- Lataa konfiguraatio
+local Config = require('config')
 
-function sendToDiscord(url, message)
-    local jsonMessage = json.encode({content = message})
-    PerformHttpRequest(url, function(err, text, headers) end, 'POST', jsonMessage, {['Content-Type'] = 'application/json'})
+-- Funktio Discord-viestin lähettämiseen
+local function sendToDiscord(message, webhookURL)
+    local embed = {
+        {
+            ["color"] = 16711680,  -- Punainen väri (voit muuttaa väriä)
+            ["title"] = "Server Log",
+            ["description"] = message,
+            ["footer"] = {
+                ["text"] = "QBcore - Server Log",
+            },
+        }
+    }
+
+    PerformHttpRequest(webhookURL, function(err, text, headers)
+        -- Voit käsitellä virheitä täällä, mutta tällä hetkellä ei tehdä mitään
+    end, 'POST', json.encode({username = "Server Log", embeds = embed}), { ['Content-Type'] = 'application/json' })
 end
 
-function isPlayerAdmin(playerId)
-    local player = QBCore.Functions.GetPlayer(playerId)
-    if player and player.PlayerData and player.PlayerData.job and player.PlayerData.job.name == 'admin' then
-        return true
+-- Vankilaan laittaminen logiikka
+local jailLog = {}
+
+RegisterCommand('jail', function(source, args, rawCommand)
+    local src = source
+    local playerName = GetPlayerName(src)
+    local playerId = GetPlayerServerId(src)
+    local targetId = tonumber(args[1])  -- Vangittavan pelaajan ID
+    local jailTime = tonumber(args[2])  -- Vankilassaoloaika
+
+    if targetId and jailTime then
+        local targetPlayer = GetPlayerName(targetId)
+        
+        -- Tallennetaan vankilaan laittaminen logiin
+        if not jailLog[playerId] then
+            jailLog[playerId] = {}
+        end
+
+        -- Lisää uusi vankilaan laittaminen logiin
+        table.insert(jailLog[playerId], {targetId = targetId, time = os.time()})
+
+        -- Poistetaan vanhat merkinnät, jotka ovat yli 10 sekuntia vanhoja
+        for i = #jailLog[playerId], 1, -1 do
+            if os.time() - jailLog[playerId][i].time > 10 then
+                table.remove(jailLog[playerId], i)
+            end
+        end
+
+        -- Tarkistetaan, onko pelaaja laittanut yli kaksi pelaajaa vankilaan 10 sekunnin sisällä
+        if #jailLog[playerId] > 2 then
+            local jailMessage = string.format(
+                "HUOMIO! Pelaaja: %s (ID: %s) laittoi yli kaksi pelaajaa vankilaan 10 sekunnin sisällä!\n",
+                playerName, playerId
+            )
+
+            -- Lisää kaikki pelaajat, jotka on laitettu vankilaan
+            jailMessage = jailMessage .. "Laitettu vankilaan olevat pelaajat:\n"
+            for _, v in ipairs(jailLog[playerId]) do
+                local targetPlayerName = GetPlayerName(v.targetId)
+                jailMessage = jailMessage .. string.format("Pelaaja: %s (ID: %s)\n", targetPlayerName, v.targetId)
+            end
+
+            -- Lähetetään huijausviesti Discordiin
+            sendToDiscord(jailMessage, Config.Webhooks.cheatLogWebhook)
+        else
+            -- Lähetetään tavallinen vankilalogiviesti Discordiin
+            local jailMessage = string.format(
+                "Pelaaja: %s (ID: %s) laittoi pelaajan %s (ID: %s) vankilaan ajaksi: %s minuuttia.",
+                playerName, playerId, targetPlayer, targetId, jailTime
+            )
+            sendToDiscord(jailMessage, Config.Webhooks.jailLogWebhook)
+        end
     else
-        return false
+        print("Virheellinen komento! Käytä: /jail [pelaajan ID] [aika minuutteina]")
     end
-end
+end, false)
 
--- Kuoleman logi
-AddEventHandler('baseevents:onPlayerDied', function(playerId, reason)
-    local playerName = GetPlayerName(playerId)
-    local message = "**Pelaaja kuoli!**\n**Nimi:** " .. playerName .. "\n**Kuolinsyy:** " .. reason
-    sendToDiscord(deathWebhookUrl, message)
+-- Laskujen lähettäminen logiikka
+local billLog = {}
+
+RegisterServerEvent('okokBilling:sendBill')
+AddEventHandler('okokBilling:sendBill', function(billId, amount, reason, targetId)
+    local src = source
+    local senderName = GetPlayerName(src)
+    local senderId = GetPlayerServerId(src)
+    local targetName = GetPlayerName(targetId)
+
+    -- Tallennetaan lasku logiin
+    billLog[billId] = {
+        senderId = senderId,
+        senderName = senderName,
+        targetId = targetId,
+        targetName = targetName,
+        amount = amount,
+        reason = reason,
+        sentTime = os.time(),
+        paid = false  -- Aluksi lasku ei ole maksettu
+    }
+
+    -- Tallennetaan laskun lähettäminen aikaleimalla
+    if not billLog[senderId] then
+        billLog[senderId] = {}
+    end
+
+    -- Lisää uusi lasku lähettäjän logiin
+    table.insert(billLog[senderId], {billId = billId, time = os.time()})
+
+    -- Poistetaan vanhat laskut, jotka ovat yli 10 sekuntia vanhoja
+    for i = #billLog[senderId], 1, -1 do
+        if os.time() - billLog[senderId][i].time > 10 then
+            table.remove(billLog[senderId], i)
+        end
+    end
+
+    -- Tarkistetaan, onko pelaaja lähettänyt yli kaksi laskua 10 sekunnin sisällä
+    if #billLog[senderId] > 2 then
+        local billMessage = string.format(
+            "HUOMIO! Pelaaja: %s (ID: %s) lähetti yli kaksi laskua 10 sekunnin sisällä!\n",
+            senderName, senderId
+        )
+
+        -- Lisää kaikki laskujen saajat ja määrät
+        billMessage = billMessage .. "Lähetetyt laskut ja vastaanottajat:\n"
+        for _, v in ipairs(billLog[senderId]) do
+            billMessage = billMessage .. string.format("Vastaanottaja: %s (ID: %s) Lasku: $%s, Syy: %s\n", 
+            v.targetName, v.targetId, v.amount, v.reason)
+        end
+
+        -- Lähetetään huijausviesti Discordiin
+        sendToDiscord(billMessage, Config.Webhooks.cheatLogWebhook)
+    else
+        -- Lähetetään tavallinen laskutuslogiviesti Discordiin
+        local billMessage = string.format(
+            "Lasku lähetetty:\nLähettäjä: %s (ID: %s)\nVastaanottaja: %s (ID: %s)\nSumma: $%s\nSyy: %s",
+            senderName, senderId, targetName, targetId, amount, reason
+        )
+        sendToDiscord(billMessage, Config.Webhooks.billingLogWebhook)
+    end
 end)
 
--- Chat logi
-AddEventHandler('chatMessage', function(source, name, message)
-    local playerName = GetPlayerName(source)
-    local formattedMessage = "**" .. playerName .. "**: " .. message
-    sendToDiscord(chatWebhookUrl, formattedMessage)
-end)
+-- Seuraa maksamattomia laskuja (7 päivän tarkistus)
+Citizen.CreateThread(function()
+    while true do
+        Citizen.Wait(86400000)  -- Odotetaan 24 tuntia (24h = 86400 sekuntia)
 
-AddEventHandler('playerCommand', function(source, command, args)
-    if isPlayerAdmin(source) then
-        local playerName = GetPlayerName(source)
+        -- Tarkistetaan kaikki laskut
+        for billId, bill in pairs(billLog) do
+            if not bill.paid then
+                local daysPassed = (os.time() - bill.sentTime) / (60 * 60 * 24)  -- Aika laskun lähettämisestä päivinä
 
-        -- Tarkistetaan, mikä komento on käytössä
-        if command == "giveitem" then
-            local itemName = args[1] or "Tuntematon"
-            local amount = args[2] or "1"
-            local message = "**Admin Komento Käytetty!**\n**Admin:** " .. playerName .. "\n**Komento:** /giveitem " .. itemName .. " " .. amount
-            sendToDiscord(adminCommandWebhookUrl, message)
-
-        elseif command == "car" then
-            local vehicleModel = args[1] or "Tuntematon"
-            local message = "**Admin Komento Käytetty!**\n**Admin:** " .. playerName .. "\n**Komento:** /car " .. vehicleModel
-            sendToDiscord(adminCommandWebhookUrl, message)
-
-        elseif command == "tp" then
-            local targetPlayerId = args[1] or "Tuntematon"
-            local message = "**Admin Komento Käytetty!**\n**Admin:** " .. playerName .. "\n**Komento:** /tp " .. targetPlayerId
-            sendToDiscord(adminCommandWebhookUrl, message)
+                -- Jos lasku on ollut maksamatta 7 päivää
+                if daysPassed >= 7 then
+                    local overdueMessage = string.format(
+                        "Maksamaton lasku:\nLähettäjä: %s (ID: %s)\nVastaanottaja: %s (ID: %s)\nSumma: $%s\nLasku lähetty: %d päivää sitten\nSyy: %s",
+                        bill.senderName, bill.senderId, bill.targetName, bill.targetId, bill.amount, math.floor(daysPassed), bill.reason
+                    )
+                    sendToDiscord(overdueMessage, Config.Webhooks.cheatLogWebhook)
+                end
+            end
         end
     end
 end)
-
--- Pelaajan liittyminen serverille
-AddEventHandler('playerConnecting', function(playerName, setKickReason, deferrals)
-    local message = "**Pelaaja liittyi serverille!**\n**Nimi:** " .. playerName
-    sendToDiscord(playerJoinLeaveWebhookUrl, message)
-end)
-
--- Pelaajan poistuminen serveriltä (mikäli hän kuoli, tai syy on disconnect, kick, ban, crash jne.)
-AddEventHandler('playerDropped', function(reason)
-    local playerName = GetPlayerName(source)
-    local disconnectReason = reason or "Tuntematon syy"
-
-    -- Tarkistetaan, oliko pelaaja kuollut
-    local isDead = false
-    if exports['baseevents']:getPlayerDead(source) then
-        isDead = true
-    end
-
-    -- Lähetetään tieto Discordiin
-    local deathStatus = isDead and "Kuollut" or "Elossa"
-    local message = "**Pelaaja poistui serveriltä!**\n**Nimi:** " .. playerName .. "\n**Poistumisen syy:** " .. disconnectReason .. "\n" .. deathStatus
-    sendToDiscord(playerJoinLeaveWebhookUrl, message)
-end)
-
--- Tiedotuksen kirjoittaminen konsoliin, kun skripti latautuu
-print("[Dextys Logs] Ladattu onnistuneesti!")
