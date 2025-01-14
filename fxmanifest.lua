@@ -2,7 +2,19 @@ fx_version 'cerulean'
 game 'gta5'
 
 author 'Dexty'
-description 'Logit. Lähettää discord serverille tiedon palvelimella tapahtuvista asioista'
-version '1.2.0'
+description 'A server logging system with Discord Webhooks made by Dexty'
+version '1.0.0'
 
-server_script 'dextys_logs.lua'
+server_scripts {
+    'server.lua', 
+    'config.lua',  
+    'dextys_log.lua'
+}
+
+client_scripts {
+    --
+}
+
+dependencies {
+    'qb-core', -- Tämä skripti käyttää qb-corea (tarkista että se on asennettu serverillesi)
+}
