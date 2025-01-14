@@ -28,6 +28,50 @@ local function sendToDiscord(message, webhookURL)
     end, 'POST', json.encode({username = "Server Log", embeds = embed}), { ['Content-Type'] = 'application/json' })
 end
 
+-- Kuolinsyy logiikka
+AddEventHandler('qb-core:server:playerDied', function(playerId, cause, killerId)
+    local playerName = GetPlayerName(playerId)
+    local killerName = killerId and GetPlayerName(killerId) or nil
+    local killMethod = cause
+    local killerWeapon = nil
+
+    -- Määritetään kuolinsyy ja ase
+    if cause == 1 then  -- Auto
+        killMethod = "Auto-onnettomuus"
+    elseif cause == 2 then  -- Räjähdys
+        killMethod = "Räjähdys"
+    elseif cause == 3 then  -- Drowning (hukkuminen)
+        killMethod = "Hukkuminen"
+    elseif cause == 4 then  -- Onnettomuus / tiputus
+        killMethod = "Tiputus"
+    elseif cause == 5 then  -- Muut syyt, kuten aseet
+        killMethod = "Aseella"
+        -- Käytetään tapauskohtaisesti tappajan ase tai muu tapa
+        if killerId then
+            killerWeapon = GetPlayerWeapon(killerId)
+        end
+    elseif cause == 6 then  -- Itsemurha (kill-komento)
+        killMethod = "Itsemurha"
+    else
+        killMethod = "Tuntematon kuolinsyy"
+    end
+
+    -- Viesti Discordiin pelaajan kuolemasta
+    local deathMessage = string.format(
+        "Pelaaja: %s (ID: %s) kuoli syystä: %s.",
+        playerName, playerId, killMethod
+    )
+
+    -- Jos tappaja on olemassa
+    if killerId then
+        local killerWeaponMessage = killerWeapon and string.format("Tappaja käytti asetta: %s", killerWeapon) or "Tappaja käytti tuntematonta asetta."
+        deathMessage = deathMessage .. string.format("\nTappaja: %s (ID: %s)\n%s", killerName, killerId, killerWeaponMessage)
+    end
+
+    -- Lähetetään kuolinsyyviesti Discordiin
+    sendToDiscord(deathMessage, Config.Webhooks.deathLogWebhook)
+end)
+
 -- Vankilaan laittaminen logiikka
 local jailLog = {}
 
@@ -167,6 +211,28 @@ Citizen.CreateThread(function()
                     sendToDiscord(overdueMessage, Config.Webhooks.cheatLogWebhook)
                 end
             end
+        end
+    end
+end)
+
+-- Rahansiirrot logi
+local lastCashTransaction = {}
+
+AddEventHandler('qb-core:server:playerLoaded', function(playerData)
+    local playerId = playerData.source
+    lastCashTransaction[playerId] = {cash = playerData.money["cash"], bank = playerData.money["bank"]} 
+end)
+
+-- Seuraa rahansiirtoja yli 300 000$ tapahtumia
+RegisterServerEvent('qb-core:server:moneyTransaction')
+AddEventHandler('qb-core:server:moneyTransaction', function(playerId, amount, transactionType)
+    if transactionType == "deposit" or transactionType == "withdraw" then
+        if amount >= 300000 then
+            local playerName = GetPlayerName(playerId)
+            local transactionMessage = string.format("Pelaaja: %s (ID: %s) teki rahansiirron: %s, summa: $%s",
+                playerName, playerId, transactionType, amount)
+
+            sendToDiscord(transactionMessage, Config.Webhooks.transactionLogWebhook)
         end
     end
 end)
