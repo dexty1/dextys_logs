@@ -1,20 +1,18 @@
--- Tarkistetaan kansion nimi
 local folderName = GetCurrentResourceName()
 
 -- Jos kansio ei ole "dextys_log", lopetetaan skripti
 if folderName ~= "dextys_log" then
-    print("Virhe: Tämä skripti vaatii, että se on nimeltään 'dextys_log'.")
+    print("The folder name must be 'dextys_log'.")
     return
 end
 
--- Lataa konfiguraatio
 local Config = require('config')
 
 -- Funktio Discord-viestin lähettämiseen
 local function sendToDiscord(message, webhookURL)
     local embed = {
         {
-            ["color"] = 16711680,  -- Punainen väri (voit muuttaa väriä)
+            ["color"] = 16711680,  -- Red color
             ["title"] = "Server Log",
             ["description"] = message,
             ["footer"] = {
@@ -28,7 +26,7 @@ local function sendToDiscord(message, webhookURL)
     end, 'POST', json.encode({username = "Server Log", embeds = embed}), { ['Content-Type'] = 'application/json' })
 end
 
--- Kuolinsyy logiikka
+-- Kuolinsyy
 AddEventHandler('qb-core:server:playerDied', function(playerId, cause, killerId)
     local playerName = GetPlayerName(playerId)
     local killerName = killerId and GetPlayerName(killerId) or nil
